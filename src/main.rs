@@ -2,7 +2,8 @@ use rand::RngExt;
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
-use terminal_size::{Height, Width, terminal_size};
+use terminal_size::terminal_size;
+use utilprint::{TextEffects, utilprint};
 
 #[derive(Clone, Copy, PartialEq)]
 enum CobraEffect {
@@ -10,12 +11,6 @@ enum CobraEffect {
     Grow,
     PowerUp,
     Walk,
-}
-
-enum Shape {
-    Triangle,
-    Circle,
-    Square,
 }
 
 #[derive(Clone, Copy)]
@@ -78,25 +73,25 @@ impl ThingOnScreen {
                 position,
                 kind,
                 effect: CobraEffect::Grow,
-                value: String::from("F"),
+                value: String::from("@Y#25C9"),
             },
             ThingKind::Drug => Self {
                 position,
                 kind,
                 effect: CobraEffect::PowerUp,
-                value: String::from("D"),
+                value: String::from("@M#2615"),
             },
             ThingKind::Rock => Self {
                 position,
                 kind,
                 effect: CobraEffect::Blow,
-                value: String::from("R"),
+                value: String::from("@W#2620"),
             },
             ThingKind::Cobra => Self {
                 position,
                 kind,
                 effect: CobraEffect::Walk,
-                value: String::from("C"),
+                value: String::from("@G#2501#2501"),
             },
         }
     }
@@ -264,7 +259,7 @@ impl GameState {
 
     fn game_over(&mut self) {
         self.clear_screen();
-        println!("Game Over! Press R to try again!")
+        utilprint("Game Over! Press R to try again!".lover())
     }
 
     fn die(&mut self) {
@@ -339,7 +334,7 @@ impl GameState {
                     line += " "
                 }
             }
-            println!("{line}");
+            utilprint(line);
         }
     }
 

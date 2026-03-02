@@ -50,6 +50,7 @@ dependencies = [
  "rand",
  "rdev",
  "terminal_size",
+ "utilprint",
  "x11",
 ]
 
@@ -449,6 +450,15 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "utilprint"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a84eb111ce8a268d3b7ee7ae46a9ba1665a816f507d665831fd5ea25a5e27e3"
+dependencies = [
+ "lazy_static",
+]
 
 [[package]]
 name = "wasip2"

@@ -18,18 +18,6 @@ enum Shape {
     Square,
 }
 
-struct Color {
-    r: u8,
-    g: u8,
-    b: u8,
-}
-
-impl Color {
-    fn from_rgb(r: u8, g: u8, b: u8) -> Self {
-        Self { r, g, b }
-    }
-}
-
 #[derive(Clone, Copy)]
 struct Position {
     x: u32,
@@ -46,10 +34,10 @@ impl Position {
     }
 
     fn gen_without_collision(field: &Field, cobra: &Cobra) -> Self {
-        let mut new_pos = Self::new(&field);
+        let mut new_pos = Self::new(field);
         loop {
             if cobra.collide(&new_pos) {
-                new_pos = Self::new(&field);
+                new_pos = Self::new(field);
                 continue;
             }
             let mut has_collided = false;
@@ -60,7 +48,7 @@ impl Position {
                 }
             }
             if has_collided {
-                new_pos = Self::new(&field);
+                new_pos = Self::new(field);
                 continue;
             }
             break;
@@ -78,51 +66,37 @@ enum ThingKind {
 
 struct ThingOnScreen {
     position: Position,
-    color: Color,
-    shape: Shape,
+    value: String,
     effect: CobraEffect,
     kind: ThingKind,
 }
 
 impl ThingOnScreen {
-    fn to_str(&self) -> &str {
-        match self.kind {
-            ThingKind::Food => "f",
-            ThingKind::Drug => "d",
-            ThingKind::Rock => "R",
-            ThingKind::Cobra => "C",
-        }
-    }
-
     fn new_from_kind(kind: ThingKind, position: Position) -> Self {
         match kind {
             ThingKind::Food => Self {
                 position,
                 kind,
-                color: Color::from_rgb(0, 255, 0),
-                shape: Shape::Circle,
                 effect: CobraEffect::Grow,
+                value: String::from("F"),
             },
             ThingKind::Drug => Self {
                 position,
                 kind,
-                color: Color::from_rgb(0, 255, 255),
-                shape: Shape::Triangle,
                 effect: CobraEffect::PowerUp,
+                value: String::from("D"),
             },
             ThingKind::Rock => Self {
                 position,
                 kind,
-                color: Color::from_rgb(255, 255, 255),
-                shape: Shape::Square,
                 effect: CobraEffect::Blow,
+                value: String::from("R"),
             },
             ThingKind::Cobra => Self {
                 position,
                 kind,
-                color: Color::from_rgb(0, 0, 255),
-                shape: Shape::Square,
                 effect: CobraEffect::Walk,
+                value: String::from("C"),
             },
         }
     }
@@ -203,7 +177,7 @@ impl Cobra {
     }
 
     fn move_cobra(&mut self, things: &Vec<ThingOnScreen>) -> Option<CobraEffect> {
-        let mut head = self.body[self.body.len() - 1].position.clone();
+        let mut head = self.body[self.body.len() - 1].position;
         // Move tail
         match self.head_dir {
             Direction::Up => head.y += 1,
@@ -215,7 +189,7 @@ impl Cobra {
         let mut effect: Option<CobraEffect> = None;
         for thing in things {
             if thing.collide(&head) {
-                effect = Some(thing.effect.clone());
+                effect = Some(thing.effect);
                 match thing.effect {
                     CobraEffect::Blow => self.state = CobraState::Dead,
                     CobraEffect::Grow => self
@@ -360,7 +334,7 @@ impl GameState {
             let mut line = String::with_capacity(l.len());
             for p in l {
                 if let Some(pixel) = p {
-                    line += pixel.to_str()
+                    line += &pixel.value[..]
                 } else {
                     line += " "
                 }

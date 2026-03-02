@@ -1,9 +1,10 @@
 use rand::RngExt;
+use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
+use terminal_size::{Height, Width, terminal_size};
 
 #[derive(Clone, Copy, PartialEq)]
-
 enum CobraEffect {
     Blow,
     Grow,
@@ -31,16 +32,16 @@ impl Color {
 
 #[derive(Clone, Copy)]
 struct Position {
-    x: u8,
-    y: u8,
+    x: u32,
+    y: u32,
 }
 
 impl Position {
     fn new(field: &Field) -> Self {
         let mut rng = rand::rng();
         Self {
-            x: rng.random_range(0..=field.width),
-            y: rng.random_range(0..=field.height),
+            x: rng.random_range(0..=(field.width - 1)),
+            y: rng.random_range(0..=(field.height - 1)),
         }
     }
 
@@ -84,13 +85,12 @@ struct ThingOnScreen {
 }
 
 impl ThingOnScreen {
-    
-    fn to_str(&self) -> str {
+    fn to_str(&self) -> &str {
         match self.kind {
-            ThingKind::Food =>"U+1F60B",
-            ThingKind::Drug => "U+1F48A",
-            ThingKind::Rock => "U+1FAA8",
-            ThingKind::Cobra => "U+1F7E9",
+            ThingKind::Food => "f",
+            ThingKind::Drug => "d",
+            ThingKind::Rock => "R",
+            ThingKind::Cobra => "C",
         }
     }
 
@@ -155,6 +155,7 @@ impl Level {
     }
 }
 
+#[derive(Debug)]
 enum Direction {
     Up,
     Down,
@@ -236,12 +237,12 @@ impl Cobra {
 
 struct Field {
     things: Vec<ThingOnScreen>,
-    height: u8,
-    width: u8,
+    height: u32,
+    width: u32,
 }
 
 impl Field {
-    fn new_empty(height: u8, width: u8) -> Self {
+    fn new_empty(height: u32, width: u32) -> Self {
         let things: Vec<ThingOnScreen> = Vec::new();
         Self {
             things,
@@ -266,14 +267,6 @@ impl Field {
     }
 }
 
-struct Pixel {
-    value: Option[str]
-}
-
-impl Pixel {
-    }
-
-#[derive(Debug)]
 struct GameState {
     score: i32,
     tick: i32,
@@ -283,8 +276,8 @@ struct GameState {
 }
 
 impl GameState {
-    fn init() -> Self {
-        let field = Field::new_empty(80, 60);
+    fn init(height: u32, width: u32) -> Self {
+        let field = Field::new_empty(height - 4, width - 2);
         let cobra = Cobra::new(&field, 3);
         Self {
             score: 0,
@@ -295,9 +288,24 @@ impl GameState {
         }
     }
 
-    fn game_over(&self) {}
+    fn game_over(&mut self) {
+        self.clear_screen();
+        println!("Game Over! Press R to try again!")
+    }
 
-    fn loose_life(&self) {}
+    fn die(&mut self) {
+        if self.cobra.lifes == 0 {
+            self.game_over();
+        } else {
+            self.cobra.lifes -= 1;
+            self.cobra.state = CobraState::Alive;
+            self.clear_screen();
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            println!("You died, restarting level!");
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            self.reset_level();
+        }
+    }
 
     fn reset_level(&mut self) {
         self.field
@@ -306,41 +314,56 @@ impl GameState {
 
     fn power_up(&self) {}
 
-    fn get_field(&mut self) -> Vec<Vec<Pixel>> {
-        let width = usize::from(self.field.width);
-        let height = usize::from(self.field.height);
-        let mut grid: Vec<Vec<Pixel>> = Vec::with_capacity(height);
-        for _ in 0..height {
-            let mut row: Vec<Pixel> = Vec::with_capacity(width);
-            for _ in 0..width {
-                row.push(Pixel::None);
+    fn get_field(&mut self) -> Vec<Vec<Option<&ThingOnScreen>>> {
+        let mut grid: Vec<Vec<Option<&ThingOnScreen>>> =
+            Vec::with_capacity(self.field.height as usize);
+        for _ in 0..self.field.height {
+            let mut row: Vec<Option<&ThingOnScreen>> =
+                Vec::with_capacity(self.field.width as usize);
+            for _ in 0..self.field.width {
+                row.push(None);
             }
             grid.push(row);
         }
         for thing in &self.field.things {
-            let ix = usize::from(thing.position.x);
-            let iy = usize::from(thing.position.y);
-            grid[iy][ix] = Pixel::Some(thing);
+            let ix = thing.position.x as usize;
+            let iy = thing.position.y as usize;
+            grid[iy][ix] = Some(thing);
         }
         for body_part in &self.cobra.body {
-            let ix = usize::from(body_part.position.x);
-            let iy = usize::from(body_part.position.y);
-            grid[iy][ix] = Pixel::Some(body_part);
+            let ix = body_part.position.x as usize;
+            let iy = body_part.position.y as usize;
+            grid[iy][ix] = Some(body_part);
         }
         grid
     }
 
+    fn clear_screen(&mut self) {
+        print!("\x1B[2J\x1B[1;1H");
+        io::stdout().flush().unwrap();
+    }
+
     fn render(&mut self) {
-        println!("Game State: {!dbg}" % &self);
+        self.clear_screen();
+        println!(
+            "Field: {}x{}  Score: {}   Lifes: {}     Tick: {}   Head Dir: {:?}",
+            &self.field.height,
+            &self.field.width,
+            &self.score,
+            &self.cobra.lifes,
+            &self.tick,
+            &self.cobra.head_dir
+        );
+
         let field = self.get_field();
         for l in field {
-            let mut line = String::with_capacity(line.len());
+            let mut line = String::with_capacity(l.len());
             for p in l {
-                if p.is_none() {
+                if let Some(pixel) = p {
+                    line += pixel.to_str()
+                } else {
                     line += " "
                 }
-                let p_str = "{}" % p.shape();
-                line += p.shape();
             }
             println!("{line}");
         }
@@ -348,34 +371,26 @@ impl GameState {
 
     fn next_tick(&mut self) {
         self.cobra.move_cobra(&self.field.things);
+        self.render();
 
-        if let CobraState::Dead = self.cobra.state {
-            if self.cobra.lifes == 0 {
-                self.game_over();
-            } else {
-                self.cobra.lifes -= 1;
-                self.cobra.state = CobraState::Alive;
-                self.reset_level();
-            }
-        } else {
-            self.render();
-        }
         let mut power_up = false;
         if let CobraState::PoweredUp = self.cobra.state {
             power_up = true;
         }
         let cobra_speed = self.current_level.speed(power_up);
-        let mut min_wait: u32 = 2000;
+        let mut min_wait: u32 = 1000;
         if cobra_speed > 0 {
             min_wait /= cobra_speed;
         }
         let dur = Duration::from_secs(u64::from(min_wait));
         thread::sleep(dur);
+        self.tick += 1
     }
 }
 
 fn main() {
-    let mut state = GameState::init();
+    let (w, h) = terminal_size().unwrap();
+    let mut state = GameState::init(h.0 as u32, w.0 as u32);
     state.reset_level();
     loop {
         state.next_tick();

@@ -291,6 +291,16 @@ impl Cobra {
                 break;
             }
         }
+        match effect {
+            Some(CobraEffect::Blow) => {
+                self.state = CobraState::Dead;
+                return effect;
+            }
+            Some(CobraEffect::Grow) => (),
+            Some(CobraEffect::PowerUp) => self.state = CobraState::PoweredUp,
+            // move cobra
+            _ => (),
+        }
         let new_head = ThingOnScreen::get_cobra_pixel(Some(&neck.position), new_head_pos, None);
         // Create new neck as can change depending on move Direction
         self.body[neck_i] = ThingOnScreen::get_cobra_pixel(
@@ -299,13 +309,7 @@ impl Cobra {
             Some(&new_head.position),
         );
         self.body.push(new_head);
-        match effect {
-            Some(CobraEffect::Blow) => self.state = CobraState::Dead,
-            Some(CobraEffect::Grow) => (),
-            Some(CobraEffect::PowerUp) => self.state = CobraState::PoweredUp,
-            // move cobra
-            _ => _ = self.body.remove(0),
-        }
+        self.body.remove(0);
         effect
     }
 }

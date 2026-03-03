@@ -91,7 +91,7 @@ impl ThingOnScreen {
                 position,
                 kind,
                 effect: CobraEffect::Walk,
-                value: String::from("@G#2501#2501"),
+                value: String::from("@G#2501"),
             },
         }
     }
@@ -116,7 +116,7 @@ impl Level {
     }
 
     fn speed(&self, power_up: bool) -> u32 {
-        let mut speed = u32::from(self.number) * 1000;
+        let mut speed = u32::from(self.number) * 2000;
         if power_up {
             speed += speed / 4
         }
@@ -142,24 +142,41 @@ struct Cobra {
     body: Vec<ThingOnScreen>,
     head_dir: Direction,
     state: CobraState,
-    lifes: u8,
+    lives: u8,
 }
 
 impl Cobra {
-    fn new(field: &Field, lifes: u8) -> Self {
-        let center_pos = Position {
-            x: &field.width / 2,
-            y: &field.height / 2,
-        };
-        let mut body: Vec<ThingOnScreen> = Vec::with_capacity(255);
-        let body_part = ThingOnScreen::new_from_kind(ThingKind::Cobra, center_pos);
-        body.push(body_part);
-        Self {
-            body,
+    fn new(field: &Field, lives: u8) -> Self {
+        let body: Vec<ThingOnScreen> = Vec::new();
+        let mut cobra = Self {
+            body: body,
             head_dir: Direction::Right,
             state: CobraState::Alive,
-            lifes,
-        }
+            lives,
+        };
+        cobra.reset(field);
+        cobra
+    }
+    
+    fn grow(&self) {
+
+    }
+
+    fn die(&mut self, field: &Field) {
+        self.lives -= 1;
+        self.state = CobraState::Alive;
+        self.reset(field);
+    }
+
+    fn reset(&mut self, field: &Field) {
+        self.body.clear();
+        let center_pos = field.get_center();
+        let head = ThingOnScreen::new_from_kind(ThingKind::Cobra, center_pos);
+        let mut tail_pos = head.position.clone();
+        tail_pos.x -= 1;
+        let tail = ThingOnScreen::new_from_kind(ThingKind::Cobra, tail_pos);
+        self.body.push(tail);
+        self.body.push(head);
     }
 
     fn collide(&self, pos: &Position) -> bool {
@@ -171,8 +188,9 @@ impl Cobra {
         false
     }
 
-    fn move_cobra(&mut self, things: &Vec<ThingOnScreen>) -> Option<CobraEffect> {
-        let mut head = self.body[self.body.len() - 1].position;
+    fn move_cobra(&mut self, field: &Field) -> Option<CobraEffect> {
+        let mut head = self.body[self.body.len() - 1].position.clone();
+
         // Move tail
         match self.head_dir {
             Direction::Up => head.y += 1,
@@ -180,27 +198,32 @@ impl Cobra {
             Direction::Right => head.x += 1,
             Direction::Left => head.x -= 1,
         }
-        // Check for colision
+        // Handles edge collision
         let mut effect: Option<CobraEffect> = None;
-        for thing in things {
+        if head.x < 0 || head.x >= field.width || head.y < 0 || head.y >= field.height {
+            self.state = CobraState::Dead;
+            effect = Some(CobraEffect::Blow);
+
+        }
+        
+        // Check for thing colision
+        for thing in &field.things {
             if thing.collide(&head) {
                 effect = Some(thing.effect);
-                match thing.effect {
-                    CobraEffect::Blow => self.state = CobraState::Dead,
-                    CobraEffect::Grow => self
-                        .body
-                        .push(ThingOnScreen::new_from_kind(ThingKind::Cobra, head)),
-                    CobraEffect::PowerUp => self.state = CobraState::PoweredUp,
-                    _ => (),
-                }
+                break;
             }
         }
-        if effect != Some(CobraEffect::Blow) {
-            self.body
-                .push(ThingOnScreen::new_from_kind(ThingKind::Cobra, head));
-            self.body.remove(0);
+        let new_head = ThingOnScreen::new_from_kind(ThingKind::Cobra, head);
+        self.body.push(new_head);
+        match effect {
+            Some(CobraEffect::Blow) => self.state = CobraState::Dead,
+            Some(CobraEffect::Grow) => (),
+            Some(CobraEffect::PowerUp) => self.state = CobraState::PoweredUp,
+            // move cobra
+            _ => _ = self.body.remove(0),
         }
         effect
+
     }
 }
 
@@ -211,6 +234,13 @@ struct Field {
 }
 
 impl Field {
+    fn get_center(&self) -> Position {
+        Position{
+            x: self.width/2,
+            y: self.height/2
+        }
+    }
+
     fn new_empty(height: u32, width: u32) -> Self {
         let things: Vec<ThingOnScreen> = Vec::new();
         Self {
@@ -262,14 +292,12 @@ impl GameState {
         utilprint("Game Over! Press R to try again!".lover())
     }
 
-    fn die(&mut self) {
-        if self.cobra.lifes == 0 {
+    fn kill_cobra(&mut self) {
+        if self.cobra.lives == 0 {
             self.game_over();
         } else {
-            self.cobra.lifes -= 1;
-            self.cobra.state = CobraState::Alive;
+            self.cobra.lives -= 1;
             self.clear_screen();
-            std::thread::sleep(std::time::Duration::from_secs(2));
             println!("You died, restarting level!");
             std::thread::sleep(std::time::Duration::from_secs(2));
             self.reset_level();
@@ -277,11 +305,12 @@ impl GameState {
     }
 
     fn reset_level(&mut self) {
+        self.cobra.reset(&self.field);
+        self.field.things.clear();
         self.field
             .gen_things(self.current_level.number, &self.cobra);
+        self.next_tick();
     }
-
-    fn power_up(&self) {}
 
     fn get_field(&mut self) -> Vec<Vec<Option<&ThingOnScreen>>> {
         let mut grid: Vec<Vec<Option<&ThingOnScreen>>> =
@@ -315,11 +344,11 @@ impl GameState {
     fn render(&mut self) {
         self.clear_screen();
         println!(
-            "Field: {}x{}  Score: {}   Lifes: {}     Tick: {}   Head Dir: {:?}",
+            "Field: {}x{}  Score: {}   lives: {}     Tick: {}   Head Dir: {:?}",
             &self.field.height,
             &self.field.width,
             &self.score,
-            &self.cobra.lifes,
+            &self.cobra.lives,
             &self.tick,
             &self.cobra.head_dir
         );
@@ -339,13 +368,16 @@ impl GameState {
     }
 
     fn next_tick(&mut self) {
-        self.cobra.move_cobra(&self.field.things);
         self.render();
-
+        let effect = self.cobra.move_cobra(&self.field);
         let mut power_up = false;
-        if let CobraState::PoweredUp = self.cobra.state {
+
+        if let Some(CobraEffect::Blow) = effect {
+            self.kill_cobra();
+        } else if let Some(CobraEffect::PowerUp) = effect {
             power_up = true;
         }
+
         let cobra_speed = self.current_level.speed(power_up);
         let mut min_wait: u32 = 1000;
         if cobra_speed > 0 {

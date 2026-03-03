@@ -79,7 +79,7 @@ impl ThingOnScreen {
                 position,
                 kind,
                 effect: CobraEffect::PowerUp,
-                value: String::from("@M#2615"),
+                value: String::from("@M#2605"),
             },
             ThingKind::Rock => Self {
                 position,
@@ -464,12 +464,12 @@ impl GameState {
             power_up = true;
         }
 
-        let cobra_speed = self.current_level.speed(power_up);
-        let mut min_wait: u32 = 2000;
-        if cobra_speed > 0 {
+        let cobra_speed = self.current_level.speed(power_up) as f32;
+        let mut min_wait = 1000.0;
+        if cobra_speed > 0.0 {
             min_wait /= cobra_speed;
         }
-        let dur = Duration::from_secs(u64::from(min_wait));
+        let dur = Duration::from_secs_f32(min_wait);
         thread::sleep(dur);
         self.tick += 1
     }

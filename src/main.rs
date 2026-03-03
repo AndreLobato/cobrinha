@@ -13,7 +13,7 @@ enum CobraEffect {
     Walk,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Position {
     x: u32,
     y: u32,
@@ -96,6 +96,20 @@ impl ThingOnScreen {
         }
     }
 
+    fn get_cobra_pixel(
+        prev_pos: Option<&Position>,
+        position: Position,
+        next_pos: Option<&Position>,
+    ) -> Self {
+        let value = Cobra::get_value(prev_pos, &position, next_pos);
+        Self {
+            position,
+            kind: ThingKind::Cobra,
+            effect: CobraEffect::Walk,
+            value,
+        }
+    }
+
     fn gen_at_the_field(kind: ThingKind, field: &Field, cobra: &Cobra) -> Self {
         let position = Position::gen_without_collision(field, cobra);
         Self::new_from_kind(kind, position)
@@ -149,7 +163,7 @@ impl Cobra {
     fn new(field: &Field, lives: u8) -> Self {
         let body: Vec<ThingOnScreen> = Vec::new();
         let mut cobra = Self {
-            body: body,
+            body,
             head_dir: Direction::Right,
             state: CobraState::Alive,
             lives,
@@ -157,25 +171,87 @@ impl Cobra {
         cobra.reset(field);
         cobra
     }
-    
-    fn grow(&self) {
 
+    fn get_value(
+        prev_pos: Option<&Position>,
+        pos: &Position,
+        next_pos: Option<&Position>,
+    ) -> String {
+        let mut value = String::from("@G");
+
+        if let Some(pp) = prev_pos
+            && let Some(np) = next_pos
+        {
+            if pp.x != np.x && pp.y == np.y {
+                // horizontal
+                value += "#2501";
+            } else if pp.x == np.x && pp.y != np.y {
+                // vertical
+                value += "#2503";
+            } else if (pp.x == pos.x && pp.y > pos.y && np.x > pos.x && np.y == pos.y)
+                || (pp.x < pos.x && pp.y == pos.y && np.x == pos.x && np.y > pos.y)
+            {
+                // bottom-left corner
+                value += "#2517";
+            } else if (pp.x == pos.x && pp.y < pos.y && np.x > pos.x && np.y == pos.y)
+                || (pp.x > pos.x && pp.y == pos.y && np.x == pos.x && np.y < pos.y)
+            {
+                // top-right corner
+                value += "#250F";
+            } else if (pp.x < pos.x && pp.y == pos.y && np.x == pos.x && np.y < pos.y)
+                || (pp.x == pos.x && pp.y < pos.y && np.x < pos.x && np.y == pos.y)
+            {
+                // top-left corner
+                value += "#2513";
+            } else if (pp.x < pos.x && pp.y == pos.y && np.x == pos.x && np.y > pos.y)
+                || (pp.x == pos.x && pp.y > pos.y && np.x < pos.x && np.y == pos.y)
+            {
+                // bottom-right corner
+                value += "#251B";
+            }
+        } else if let Some(pp) = prev_pos
+            && next_pos.is_none()
+        {
+            // is head
+            if pp.y == pos.y {
+                // horizontal
+                value += "#2501";
+            } else {
+                // vertical
+                value += "#2503";
+            }
+        } else if let Some(np) = next_pos
+            && prev_pos.is_none()
+        {
+            // is tail
+            if np.y == pos.y {
+                value += "#2501";
+            } else {
+                value += "#2503";
+            }
+        }
+        value
     }
 
     fn die(&mut self, field: &Field) {
         self.lives -= 1;
-        self.state = CobraState::Alive;
         self.reset(field);
     }
 
     fn reset(&mut self, field: &Field) {
         self.body.clear();
+        self.head_dir = Direction::Right;
+        self.state = CobraState::Alive;
         let center_pos = field.get_center();
-        let head = ThingOnScreen::new_from_kind(ThingKind::Cobra, center_pos);
-        let mut tail_pos = head.position.clone();
+        let mut head_pos = center_pos.clone();
+        let mut tail_pos = center_pos.clone();
+        let body = ThingOnScreen::new_from_kind(ThingKind::Cobra, center_pos);
+        head_pos.x += 1;
+        let head = ThingOnScreen::get_cobra_pixel(Some(&body.position), head_pos, None);
         tail_pos.x -= 1;
-        let tail = ThingOnScreen::new_from_kind(ThingKind::Cobra, tail_pos);
+        let tail = ThingOnScreen::get_cobra_pixel(None, tail_pos, Some(&body.position));
         self.body.push(tail);
+        self.body.push(body);
         self.body.push(head);
     }
 
@@ -189,31 +265,39 @@ impl Cobra {
     }
 
     fn move_cobra(&mut self, field: &Field) -> Option<CobraEffect> {
-        let mut head = self.body[self.body.len() - 1].position.clone();
+        let neck_i = self.body.len() - 1;
+        let neck = &self.body[neck_i];
+        let new_neck_pos = neck.position.clone();
+        let mut new_head_pos = neck.position.clone();
 
         // Move tail
         match self.head_dir {
-            Direction::Up => head.y += 1,
-            Direction::Down => head.y -= 1,
-            Direction::Right => head.x += 1,
-            Direction::Left => head.x -= 1,
+            Direction::Up => new_head_pos.y += 1,
+            Direction::Down => new_head_pos.y -= 1,
+            Direction::Right => new_head_pos.x += 1,
+            Direction::Left => new_head_pos.x -= 1,
         }
         // Handles edge collision
         let mut effect: Option<CobraEffect> = None;
-        if head.x < 0 || head.x >= field.width || head.y < 0 || head.y >= field.height {
+        if new_head_pos.x >= field.width || new_head_pos.y >= field.height {
             self.state = CobraState::Dead;
             effect = Some(CobraEffect::Blow);
-
         }
-        
+
         // Check for thing colision
         for thing in &field.things {
-            if thing.collide(&head) {
+            if thing.collide(&new_head_pos) {
                 effect = Some(thing.effect);
                 break;
             }
         }
-        let new_head = ThingOnScreen::new_from_kind(ThingKind::Cobra, head);
+        let new_head = ThingOnScreen::get_cobra_pixel(Some(&neck.position), new_head_pos, None);
+        // Create new neck as can change depending on move Direction
+        self.body[neck_i] = ThingOnScreen::get_cobra_pixel(
+            Some(&self.body[neck_i].position),
+            new_neck_pos,
+            Some(&new_head.position),
+        );
         self.body.push(new_head);
         match effect {
             Some(CobraEffect::Blow) => self.state = CobraState::Dead,
@@ -223,7 +307,6 @@ impl Cobra {
             _ => _ = self.body.remove(0),
         }
         effect
-
     }
 }
 
@@ -235,9 +318,9 @@ struct Field {
 
 impl Field {
     fn get_center(&self) -> Position {
-        Position{
-            x: self.width/2,
-            y: self.height/2
+        Position {
+            x: self.width / 2,
+            y: self.height / 2,
         }
     }
 
@@ -255,14 +338,17 @@ impl Field {
         // Add rocks
         for _ in 0..(nthings - level) {
             let rock = ThingOnScreen::gen_at_the_field(ThingKind::Rock, self, cobra);
-            self.things.push(rock)
+            self.things.push(rock);
         }
         // Add food
         let nfood = usize::from(level);
         for _ in 0..nfood {
             let food = ThingOnScreen::gen_at_the_field(ThingKind::Food, self, cobra);
-            self.things.push(food)
+            self.things.push(food);
         }
+        // Add Drug
+        let drug = ThingOnScreen::gen_at_the_field(ThingKind::Drug, self, cobra);
+        self.things.push(drug);
     }
 }
 
@@ -296,10 +382,10 @@ impl GameState {
         if self.cobra.lives == 0 {
             self.game_over();
         } else {
-            self.cobra.lives -= 1;
             self.clear_screen();
             println!("You died, restarting level!");
             std::thread::sleep(std::time::Duration::from_secs(2));
+            self.cobra.die(&self.field);
             self.reset_level();
         }
     }
@@ -379,7 +465,7 @@ impl GameState {
         }
 
         let cobra_speed = self.current_level.speed(power_up);
-        let mut min_wait: u32 = 1000;
+        let mut min_wait: u32 = 2000;
         if cobra_speed > 0 {
             min_wait /= cobra_speed;
         }

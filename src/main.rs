@@ -1,5 +1,7 @@
 use rand::RngExt;
+use rdev::{Event, EventType, Key, Keyboard, listen};
 use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use terminal_size::terminal_size;
@@ -362,10 +364,12 @@ struct GameState {
     current_level: Level,
     field: Field,
     cobra: Cobra,
+    set_exit: bool,
+    last_key: Arc<Mutex<Option<EventType>>>,
 }
 
 impl GameState {
-    fn init(height: u32, width: u32) -> Self {
+    fn init(height: u32, width: u32, last_key: Arc<Mutex<Option<EventType>>>) -> Self {
         let field = Field::new_empty(height - 4, width - 2);
         let cobra = Cobra::new(&field, 3);
         Self {
@@ -374,12 +378,34 @@ impl GameState {
             current_level: Level::new(1),
             field,
             cobra,
+            set_exit: false,
+            last_key,
         }
     }
 
     fn game_over(&mut self) {
         self.clear_screen();
         utilprint("Game Over! Press R to try again!".lover())
+    }
+
+    fn bye(&mut self) {
+        self.clear_screen();
+        println!("You pressed Q, Good bye!!!")
+    }
+
+    fn handle_keys(&mut self) {
+        if let Some(key) = &*self.last_key.lock().unwrap() {
+            match key {
+                EventType::KeyPress(Key::UpArrow) => {
+                    self.cobra.head_dir = Direction::Up;
+                }
+                EventType::KeyPress(Key::DownArrow) => self.cobra.head_dir = Direction::Down,
+                EventType::KeyPress(Key::RightArrow) => self.cobra.head_dir = Direction::Right,
+                EventType::KeyPress(Key::LeftArrow) => self.cobra.head_dir = Direction::Left,
+                EventType::KeyPress(Key::KeyQ) => self.set_exit = true,
+                _ => (),
+            };
+        }
     }
 
     fn kill_cobra(&mut self) {
@@ -458,6 +484,10 @@ impl GameState {
     }
 
     fn next_tick(&mut self) {
+        if self.set_exit {
+            self.bye();
+            return;
+        }
         self.render();
         let effect = self.cobra.move_cobra(&self.field);
         let mut power_up = false;
@@ -479,11 +509,30 @@ impl GameState {
     }
 }
 
+static LAST_KEY: once_cell::sync::Lazy<Arc<Mutex<Option<EventType>>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(None)));
+
 fn main() {
     let (w, h) = terminal_size().unwrap();
-    let mut state = GameState::init(h.0 as u32, w.0 as u32);
+    let callback = move |event: Event| {
+        let last_key = Arc::clone(&LAST_KEY);
+        let mut key = last_key.lock().unwrap();
+        *key = Some(event.event_type);
+    };
+    let last_key = Arc::clone(&LAST_KEY);
+    let mut state = GameState::init(h.0 as u32, w.0 as u32, last_key);
     state.reset_level();
+    let handle = thread::spawn(move || {
+        // Code to run in the new thread
+        if let Err(error) = listen(callback) {
+            println!("Error: {:?}", error)
+        }
+    });
     loop {
         state.next_tick();
+        if state.set_exit {
+            break;
+        }
     }
+    handle.join().unwrap();
 }

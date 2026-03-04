@@ -82,6 +82,7 @@ name = "cobrinha"
 version = "0.1.0"
 dependencies = [
  "hotkey-listener",
+ "once_cell",
  "rand",
  "rdev",
  "terminal_size",
@@ -391,6 +392,12 @@ checksum = "915b1b472bc21c53464d6c8461c9d3af805ba1ef837e1cac254428f4a77177b1"
 dependencies = [
  "malloc_buf",
 ]
+
+[[package]]
+name = "once_cell"
+version = "1.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "pkg-config"

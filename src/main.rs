@@ -303,7 +303,7 @@ impl Cobra {
         false
     }
 
-    fn move_cobra(&mut self, field: &Field) -> Option<CobraEffect> {
+    fn move_cobra(&mut self, field: &mut Field) -> Option<CobraEffect> {
         let neck_i = self.body.len() - 1;
         let neck = &self.body[neck_i];
         let new_neck_pos = neck.position.clone();
@@ -330,22 +330,26 @@ impl Cobra {
                 break;
             }
         }
-        match effect {
-            Some(CobraEffect::Blow) => self.state = CobraState::Dead,
-            Some(CobraEffect::Grow) => (),
-            Some(CobraEffect::PowerUp) => self.state = CobraState::PoweredUp,
-            // move cobra
-            _ => (),
-        }
-        let new_head = ThingOnScreen::get_cobra_pixel(Some(&neck.position), pos, None);
         // Create new neck as can change depending on move Direction
+        let new_head = ThingOnScreen::get_cobra_pixel(Some(&neck.position), pos, None);
         self.body[neck_i] = ThingOnScreen::get_cobra_pixel(
             Some(&self.body[neck_i].position),
             new_neck_pos,
             Some(&new_head.position),
         );
         self.body.push(new_head);
-        self.body.remove(0);
+        match effect {
+            Some(CobraEffect::Blow) => self.state = CobraState::Dead,
+            Some(CobraEffect::PowerUp) => {
+                self.state = CobraState::PoweredUp;
+                self.body.remove(0);
+            }
+            Some(CobraEffect::Grow) => (),
+            // move cobra
+            _ => {
+                self.body.remove(0);
+            }
+        }
         effect
     }
 }
@@ -396,8 +400,7 @@ impl Field {
             self.things.push(rock);
         }
         // Add food
-        let nfood = usize::from(level);
-        for _ in 0..nfood {
+        for _ in 0..(level * 2) as usize {
             let food = ThingOnScreen::gen_at_the_field(ThingKind::Food, self, cobra);
             self.things.push(food);
         }
@@ -540,7 +543,7 @@ impl GameState {
             return;
         }
         self.render();
-        let effect = self.cobra.move_cobra(&self.field);
+        let effect = self.cobra.move_cobra(&mut self.field);
         let mut power_up = false;
 
         if let Some(CobraEffect::Blow) = effect {

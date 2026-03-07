@@ -177,7 +177,7 @@ impl Level {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Direction {
     Up,
     Down,
@@ -303,35 +303,54 @@ impl Cobra {
         false
     }
 
+    fn dir_from_key(&self, key: &EventType) -> Option<Direction> {
+        match key {
+            EventType::KeyPress(Key::UpArrow) => Some(Direction::Up),
+            EventType::KeyPress(Key::DownArrow) => Some(Direction::Down),
+            EventType::KeyPress(Key::RightArrow) => Some(Direction::Right),
+            EventType::KeyPress(Key::LeftArrow) => Some(Direction::Left),
+            _ => None,
+        }
+    }
+
+    fn set_direction(&mut self, direction: Direction) {
+        self.head_dir = direction
+    }
+
     fn move_cobra(&mut self, field: &mut Field) -> Option<CobraEffect> {
         let neck_i = self.body.len() - 1;
         let neck = &self.body[neck_i];
         let new_neck_pos = neck.position.clone();
-        let mut pos = neck.position.clone();
+        let mut head_pos = neck.position.clone();
 
         // Move tail
         match self.head_dir {
-            Direction::Up => pos.y -= 1,
-            Direction::Down => pos.y += 1,
-            Direction::Right => pos.x += 1,
-            Direction::Left => pos.x -= 1,
+            Direction::Up => head_pos.y -= 1,
+            Direction::Down => head_pos.y += 1,
+            Direction::Right => head_pos.x += 1,
+            Direction::Left => head_pos.x -= 1,
         }
         // Handles edge collision
         let mut effect: Option<CobraEffect> = None;
-        if pos.x == field.width || pos.y == field.height || pos.x == 0 || pos.y == 0 {
+        if head_pos.x == field.width
+            || head_pos.y == field.height
+            || head_pos.x == 0
+            || head_pos.y == 0
+        {
             self.state = CobraState::Dead;
             effect = Some(CobraEffect::Blow);
         }
 
         // Check for thing colision
-        for thing in &field.things {
-            if thing.collide(&pos) {
+        for thing in &mut field.things {
+            if thing.collide(&head_pos) {
                 effect = thing.effect;
+                thing.effect = None;
                 break;
             }
         }
         // Create new neck as can change depending on move Direction
-        let new_head = ThingOnScreen::get_cobra_pixel(Some(&neck.position), pos, None);
+        let new_head = ThingOnScreen::get_cobra_pixel(Some(&neck.position), head_pos, None);
         self.body[neck_i] = ThingOnScreen::get_cobra_pixel(
             Some(&self.body[neck_i].position),
             new_neck_pos,
@@ -408,30 +427,49 @@ impl Field {
         let drug = ThingOnScreen::gen_at_the_field(ThingKind::Drug, self, cobra);
         self.things.push(drug);
     }
+
+    fn food_left(&self) -> i32 {
+        let mut food_left = 0;
+        for thing in &self.things {
+            if let ThingKind::Food = thing.kind
+                && thing.effect.is_some()
+            {
+                food_left += 1;
+            }
+        }
+        food_left
+    }
 }
 
 struct GameState {
     score: i32,
     tick: i32,
-    current_level: Level,
+    level: Level,
     field: Field,
     cobra: Cobra,
     set_exit: bool,
     last_key: Arc<Mutex<Option<EventType>>>,
+    key_is_pressed: Arc<Mutex<bool>>,
 }
 
 impl GameState {
-    fn init(height: u32, width: u32, last_key: Arc<Mutex<Option<EventType>>>) -> Self {
-        let field = Field::new_empty(height - 4, width - 2);
+    fn init(
+        height: u32,
+        width: u32,
+        last_key: Arc<Mutex<Option<EventType>>>,
+        key_is_pressed: Arc<Mutex<bool>>,
+    ) -> Self {
+        let field = Field::new_empty(height - 3, width - 2);
         let cobra = Cobra::new(&field, 3);
         Self {
             score: 0,
             tick: 0,
-            current_level: Level::new(1),
+            level: Level::new(1),
             field,
             cobra,
             set_exit: false,
             last_key,
+            key_is_pressed,
         }
     }
 
@@ -447,14 +485,12 @@ impl GameState {
 
     fn handle_keys(&mut self) {
         if let Some(key) = &*self.last_key.lock().unwrap() {
-            match key {
-                EventType::KeyPress(Key::UpArrow) => self.cobra.head_dir = Direction::Up,
-                EventType::KeyPress(Key::DownArrow) => self.cobra.head_dir = Direction::Down,
-                EventType::KeyPress(Key::RightArrow) => self.cobra.head_dir = Direction::Right,
-                EventType::KeyPress(Key::LeftArrow) => self.cobra.head_dir = Direction::Left,
-                EventType::KeyPress(Key::KeyQ) => self.set_exit = true,
-                _ => (),
-            };
+            let dir = self.cobra.dir_from_key(key);
+            if let EventType::KeyPress(Key::KeyQ) = key {
+                self.set_exit = true
+            } else if let Some(d) = dir {
+                self.cobra.set_direction(d);
+            }
         }
     }
 
@@ -466,16 +502,23 @@ impl GameState {
             println!("You died, restarting level!");
             std::thread::sleep(std::time::Duration::from_secs(2));
             self.cobra.die(&self.field);
-            self.reset_level();
+            self.reset_level(true);
         }
     }
 
-    fn reset_level(&mut self) {
-        self.cobra.reset(&self.field);
+    fn reset_level(&mut self, reset_cobra: bool) {
+        if reset_cobra {
+            self.cobra.reset(&self.field);
+        }
         self.field.things.clear();
-        self.field
-            .gen_things(self.current_level.number, &self.cobra);
+        self.field.gen_things(self.level.number, &self.cobra);
         self.next_tick();
+    }
+
+    fn level_up(&mut self) {
+        println!("Level up!");
+        self.level.number += 1;
+        self.reset_level(false);
     }
 
     fn get_field(&mut self) -> Vec<Vec<Option<&ThingOnScreen>>> {
@@ -492,7 +535,9 @@ impl GameState {
 
         for thing in &self.field.things {
             let (iy, ix) = thing.get_idx();
-            grid[iy][ix] = Some(thing);
+            if thing.effect.is_some() {
+                grid[iy][ix] = Some(thing);
+            }
         }
         for thing in &self.cobra.body {
             let (iy, ix) = thing.get_idx();
@@ -513,13 +558,15 @@ impl GameState {
     fn render(&mut self) {
         self.clear_screen();
         println!(
-            "Field: {}x{}  Score: {}   lives: {}     Tick: {}   Head Dir: {:?}",
+            "Field: {}x{}  Score: {:05}   lives: {}  Tick: {}  Head Dir: {:?}  Level:{} Food left: {}",
             &self.field.height,
             &self.field.width,
             &self.score,
             &self.cobra.lives,
             &self.tick,
-            &self.cobra.head_dir
+            &self.cobra.head_dir,
+            &self.level.number,
+            self.field.food_left(),
         );
 
         let field = self.get_field();
@@ -550,14 +597,25 @@ impl GameState {
             self.kill_cobra();
         } else if let Some(CobraEffect::PowerUp) = effect {
             power_up = true;
+        } else if self.field.food_left() == 0 {
+            self.level_up();
         }
 
-        let cobra_speed = self.current_level.speed(power_up) as f32;
+        let cobra_speed = self.level.speed(power_up) as f32;
         let mut min_wait = 1000.0;
         if cobra_speed > 0.0 {
             min_wait /= cobra_speed;
         }
-        let dur = Duration::from_secs_f32(min_wait);
+        let mut dur = Duration::from_secs_f32(min_wait);
+        if let Some(key) = &*self.last_key.lock().unwrap() {
+            let key_dir = self.cobra.dir_from_key(key);
+            if let Some(k) = key_dir
+                && k == self.cobra.head_dir
+                && *self.key_is_pressed.lock().unwrap()
+            {
+                dur /= 2;
+            }
+        }
         thread::sleep(dur);
         self.tick += 1
     }
@@ -565,19 +623,28 @@ impl GameState {
 
 static LAST_KEY: once_cell::sync::Lazy<Arc<Mutex<Option<EventType>>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(None)));
+static KEY_IS_PRESSED: once_cell::sync::Lazy<Arc<Mutex<bool>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(false)));
 
 fn main() {
     let (w, h) = terminal_size().unwrap();
     let callback = move |event: Event| {
+        let last_key = Arc::clone(&LAST_KEY);
+        let key_is_pressed = Arc::clone(&KEY_IS_PRESSED);
+        let mut key = last_key.lock().unwrap();
+        let mut is_pressed = key_is_pressed.lock().unwrap();
         if let EventType::KeyPress(_) = event.event_type {
-            let last_key = Arc::clone(&LAST_KEY);
-            let mut key = last_key.lock().unwrap();
             *key = Some(event.event_type);
+            *is_pressed = true;
+        }
+        if let EventType::KeyRelease(_) = event.event_type {
+            *is_pressed = false;
         }
     };
     let last_key = Arc::clone(&LAST_KEY);
-    let mut state = GameState::init(h.0 as u32, w.0 as u32, last_key);
-    state.reset_level();
+    let is_pressed = Arc::clone(&KEY_IS_PRESSED);
+    let mut state = GameState::init(h.0 as u32, w.0 as u32, last_key, is_pressed);
+    state.reset_level(true);
     let handle = thread::spawn(move || {
         // Code to run in the new thread
         if let Err(error) = listen(callback) {

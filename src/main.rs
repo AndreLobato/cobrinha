@@ -38,7 +38,7 @@ impl Position {
             }
             let mut has_collided = false;
             for thing in &field.things {
-                if thing.collide(&new_pos) {
+                if thing.collide(&new_pos, false) {
                     has_collided = true;
                     break;
                 }
@@ -154,8 +154,12 @@ impl ThingOnScreen {
         Self::from_kind_at_pos(kind, position)
     }
 
-    fn collide(&self, pos: &Position) -> bool {
-        pos.x == self.position.x && pos.y == self.position.y
+    fn collide(&self, pos: &Position, any_axis: bool) -> bool {
+        if any_axis {
+            pos.x == self.position.x || pos.y == self.position.y
+        } else {
+            pos.x == self.position.x && pos.y == self.position.y
+        }
     }
 }
 
@@ -323,28 +327,36 @@ impl Cobra {
         let new_neck_pos = neck.position.clone();
         let mut head_pos = neck.position.clone();
 
-        // Move tail
+        // Move head
         match self.head_dir {
-            Direction::Up => head_pos.y -= 1,
-            Direction::Down => head_pos.y += 1,
-            Direction::Right => head_pos.x += 1,
-            Direction::Left => head_pos.x -= 1,
+            Direction::Up => head_pos.y = (head_pos.y as i32 - 1).max(0) as u32,
+            Direction::Down => {
+                head_pos.y = (head_pos.y as i32 + 1).min((field.height - 1) as i32) as u32
+            }
+            Direction::Right => {
+                head_pos.x = (head_pos.x as i32 + 1).min((field.width - 1) as i32) as u32
+            }
+            Direction::Left => head_pos.x = (head_pos.x as i32 - 1).max(0) as u32,
         }
-        // Handles edge collision
+
         let mut effect: Option<CobraEffect> = None;
-        if head_pos.x == field.width
-            || head_pos.y == field.height
-            || head_pos.x == 0
-            || head_pos.y == 0
-        {
-            self.state = CobraState::Dead;
+        // Check for self collision
+        if self.collide(&head_pos) {
             effect = Some(CobraEffect::Blow);
+        }
+
+        // Handles edge collision
+        for thing in &mut field.edges {
+            if thing.collide(&head_pos, true) {
+                effect = thing.effect;
+            }
         }
 
         // Check for thing colision
         for thing in &mut field.things {
-            if thing.collide(&head_pos) {
+            if thing.collide(&head_pos, false) {
                 effect = thing.effect;
+                // Consumes thing effect
                 thing.effect = None;
                 break;
             }
@@ -558,7 +570,7 @@ impl GameState {
     fn render(&mut self) {
         self.clear_screen();
         println!(
-            "Field: {}x{}  Score: {:05}   lives: {}  Tick: {}  Head Dir: {:?}  Level:{} Food left: {}",
+            "Field: {}x{}  Score: {:05}   lives: {}  Tick: {}  Head Dir: {:?}  Level:{} Food left: {} Head pos: {}x{}",
             &self.field.height,
             &self.field.width,
             &self.score,
@@ -567,6 +579,8 @@ impl GameState {
             &self.cobra.head_dir,
             &self.level.number,
             self.field.food_left(),
+            &self.cobra.body[self.cobra.body.len() - 1].position.y,
+            &self.cobra.body[self.cobra.body.len() - 1].position.x
         );
 
         let field = self.get_field();
@@ -589,8 +603,11 @@ impl GameState {
             self.bye();
             return;
         }
-        self.render();
-        let effect = self.cobra.move_cobra(&mut self.field);
+        let mut effect: Option<CobraEffect> = None;
+        if let CobraState::Alive = self.cobra.state {
+            effect = self.cobra.move_cobra(&mut self.field);
+        }
+
         let mut power_up = false;
 
         if let Some(CobraEffect::Blow) = effect {
@@ -616,6 +633,7 @@ impl GameState {
                 dur /= 2;
             }
         }
+        self.render();
         thread::sleep(dur);
         self.tick += 1
     }

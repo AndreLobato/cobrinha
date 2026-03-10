@@ -137,7 +137,7 @@ impl ThingOnScreen {
         }
         if value.contains("#") {
             Some(Self {
-                effect: None,
+                effect: Some(CobraEffect::Blow),
                 position: Position { x, y },
                 kind: ThingKind::Edge,
                 value,
@@ -305,6 +305,17 @@ impl Cobra {
         false
     }
 
+    fn head_collide(&self, pos: &Position) -> bool {
+        let mut collides = false;
+        for body_part in &self.body[..(self.body.len() - 2)] {
+            if pos.x == body_part.x && pos.y == body_part.y {
+                collides = true;
+                break;
+            }
+        }
+        collides
+    }
+
     fn dir_from_key(&self, key: &EventType) -> Option<Direction> {
         match key {
             EventType::KeyPress(Key::UpArrow) => Some(Direction::Up),
@@ -338,9 +349,9 @@ impl Cobra {
 
         let mut effect: Option<CobraEffect> = None;
         // Check for self collision
-        //if self.collide(&head_pos) {
-        //    effect = Some(CobraEffect::Blow);
-        //}
+        if self.head_collide(&head_pos) {
+            effect = Some(CobraEffect::Blow);
+        }
 
         // Handles edge collision
         for thing in &mut field.edges {

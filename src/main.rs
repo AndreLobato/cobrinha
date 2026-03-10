@@ -1,3 +1,4 @@
+use parking_lot::Mutex as SafeMutex;
 use rand::RngExt;
 use rdev::{Event, EventType, Key, listen};
 use std::io::{self, Write};
@@ -467,7 +468,7 @@ impl Field {
 
 struct GameState {
     score: i32,
-    tick: i32,
+    tick: Arc<SafeMutex<i32>>,
     level: Level,
     field: Field,
     cobra: Cobra,
@@ -482,12 +483,13 @@ impl GameState {
         width: u32,
         last_key: Arc<Mutex<Option<EventType>>>,
         key_is_pressed: Arc<Mutex<bool>>,
+        tick: Arc<SafeMutex<i32>>,
     ) -> Self {
         let field = Field::new_empty(height - 3, width - 2);
         let cobra = Cobra::new(&field, 3);
         Self {
             score: 0,
-            tick: 0,
+            tick,
             level: Level::new(1),
             field,
             cobra,
@@ -581,12 +583,12 @@ impl GameState {
     fn render(&mut self) {
         self.clear_screen();
         println!(
-            "Field: {}x{}  Score: {:05}   lives: {}  Tick: {}  Head Dir: {:?}  Level:{} Food left: {} State: {:?}",
+            "Field: {}x{}  Score: {:05}   lives: {}  Tick: {:?},   Head Dir: {:?}  Level:{} Food left: {} State: {:?}",
             &self.field.height,
             &self.field.width,
             &self.score,
             &self.cobra.lives,
-            &self.tick,
+            &*self.tick,
             &self.cobra.head_dir,
             &self.level.number,
             self.field.food_left(),
@@ -648,8 +650,12 @@ impl GameState {
             }
         }
         self.render();
-        thread::sleep(dur);
-        self.tick += 1
+        let mut tick = self.tick.lock();
+        *tick += 1;
+        self.tick.try_lock_for(dur);
+        if self.tick.is_locked() {
+            drop(tick);
+        }
     }
 }
 
@@ -657,17 +663,21 @@ static LAST_KEY: once_cell::sync::Lazy<Arc<Mutex<Option<EventType>>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(None)));
 static KEY_IS_PRESSED: once_cell::sync::Lazy<Arc<Mutex<bool>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(false)));
+static TICK: once_cell::sync::Lazy<Arc<SafeMutex<i32>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(SafeMutex::new(0)));
 
 fn main() {
     let (w, h) = terminal_size().unwrap();
     let callback = move |event: Event| {
         let last_key = Arc::clone(&LAST_KEY);
         let key_is_pressed = Arc::clone(&KEY_IS_PRESSED);
+        let tick = Arc::clone(&TICK);
         let mut key = last_key.lock().unwrap();
         let mut is_pressed = key_is_pressed.lock().unwrap();
         if let EventType::KeyPress(_) = event.event_type {
             *key = Some(event.event_type);
             *is_pressed = true;
+            drop(tick);
         }
         if let EventType::KeyRelease(_) = event.event_type {
             *is_pressed = false;
@@ -675,7 +685,8 @@ fn main() {
     };
     let last_key = Arc::clone(&LAST_KEY);
     let is_pressed = Arc::clone(&KEY_IS_PRESSED);
-    let mut state = GameState::init(h.0 as u32, w.0 as u32, last_key, is_pressed);
+    let tick = Arc::clone(&TICK);
+    let mut state = GameState::init(h.0 as u32, w.0 as u32, last_key, is_pressed, tick);
     state.reset_level(true);
     let handle = thread::spawn(move || {
         // Code to run in the new thread

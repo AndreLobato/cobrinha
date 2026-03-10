@@ -14,7 +14,7 @@ enum CobraEffect {
     PowerUp,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Position {
     x: u32,
     y: u32,
@@ -37,8 +37,11 @@ impl Position {
                 continue;
             }
             let mut has_collided = false;
-            for thing in &field.things {
-                if thing.collide(&new_pos, false) {
+            let mut all_things = Vec::new();
+            all_things.extend(&field.things);
+            all_things.extend(&field.edges);
+            for thing in all_things {
+                if thing.collide(&new_pos) {
                     has_collided = true;
                     break;
                 }
@@ -104,12 +107,7 @@ impl ThingOnScreen {
         }
     }
 
-    fn get_cobra_pixel(
-        prev_pos: Option<&Position>,
-        position: Position,
-        next_pos: Option<&Position>,
-    ) -> Self {
-        let value = Cobra::get_value(prev_pos, &position, next_pos);
+    fn get_cobra_pixel(value: String, position: Position) -> Self {
         Self {
             position,
             kind: ThingKind::Cobra,
@@ -154,12 +152,8 @@ impl ThingOnScreen {
         Self::from_kind_at_pos(kind, position)
     }
 
-    fn collide(&self, pos: &Position, any_axis: bool) -> bool {
-        if any_axis {
-            pos.x == self.position.x || pos.y == self.position.y
-        } else {
-            pos.x == self.position.x && pos.y == self.position.y
-        }
+    fn collide(&self, pos: &Position) -> bool {
+        pos.x == self.position.x && pos.y == self.position.y
     }
 }
 
@@ -172,12 +166,8 @@ impl Level {
         Self { number }
     }
 
-    fn speed(&self, power_up: bool) -> u32 {
-        let mut speed = u32::from(self.number) * 2000;
-        if power_up {
-            speed += speed / 4
-        }
-        speed
+    fn get_speed(&self, min_delay: &f32) -> f32 {
+        self.number as f32 * min_delay
     }
 }
 
@@ -189,6 +179,7 @@ enum Direction {
     Left,
 }
 
+#[derive(Debug)]
 enum CobraState {
     Alive,
     PoweredUp,
@@ -196,64 +187,74 @@ enum CobraState {
 }
 
 struct Cobra {
-    body: Vec<ThingOnScreen>,
+    body: Vec<Position>,
     head_dir: Direction,
     state: CobraState,
     lives: u8,
+    power_ticks_left: u8,
 }
 
 impl Cobra {
     fn new(field: &Field, lives: u8) -> Self {
-        let body: Vec<ThingOnScreen> = Vec::new();
+        let body: Vec<Position> = Vec::new();
         let mut cobra = Self {
             body,
             head_dir: Direction::Right,
             state: CobraState::Alive,
             lives,
+            power_ticks_left: 0,
         };
         cobra.reset(field);
         cobra
     }
 
-    fn get_value(
-        prev_pos: Option<&Position>,
-        pos: &Position,
-        next_pos: Option<&Position>,
-    ) -> String {
-        let mut value = String::from("@G");
+    fn get_value(&self, index: usize) -> String {
+        let mut value = String::new();
+        if let CobraState::PoweredUp = self.state {
+            value += "@M"
+        } else {
+            value += "@G"
+        }
+        let mut prev_thing: Option<&Position> = None;
+        if index > 0 {
+            prev_thing = self.body.get(0.max(index - 1));
+        }
+        let pos = &self.body[index];
+        let next_thing = self.body.get(self.body.len().min(index));
 
-        if let Some(pp) = prev_pos
-            && let Some(np) = next_pos
+        if let Some(pp) = prev_thing
+            && let Some(np) = next_thing
         {
-            if pp.x != np.x && pp.y == np.y {
+            // top to right or right to top
+            if (pp.x == pos.x && pp.y < pos.y && np.x > pos.x && np.y == pos.y)
+                || (pp.x > pos.x && pp.y == pos.y && np.x == pos.x && np.y < pos.y)
+            {
+                value += "#2517";
+            // bottom to right or right to bottom
+            } else if (pp.x == pos.x && pp.y > pos.y && np.x > pos.x && np.y == pos.y)
+                || (pp.x > pos.x && pp.y == pos.y && np.x == pos.x && np.y > pos.y)
+            {
+                value += "#250F";
+            // left to bottom or bottom to left
+            } else if (pp.x < pos.x && pp.y == pos.y && np.x == pos.x && np.y > pos.y)
+                || (pp.x == pos.x && pp.y > pos.y && np.x < pos.x && np.y == pos.y)
+            {
+                value += "#2513";
+            // left to top or top to left
+            } else if (pp.x < pos.x && pp.y == pos.y && np.x == pos.x && np.y < pos.y)
+                || (pp.x == pos.x && pp.y > pos.y && np.x < pos.x && np.y == pos.y)
+            {
+                // bottom-right corner
+                value += "#251B";
+            } else if pp.x != np.x && pp.y == np.y {
                 // horizontal
                 value += "#2501";
             } else if pp.x == np.x && pp.y != np.y {
                 // vertical
                 value += "#2503";
-            } else if (pp.x == pos.x && pp.y > pos.y && np.x > pos.x && np.y == pos.y)
-                || (pp.x < pos.x && pp.y == pos.y && np.x == pos.x && np.y > pos.y)
-            {
-                // bottom-left corner
-                value += "#2517";
-            } else if (pp.x == pos.x && pp.y < pos.y && np.x > pos.x && np.y == pos.y)
-                || (pp.x > pos.x && pp.y == pos.y && np.x == pos.x && np.y < pos.y)
-            {
-                // top-right corner
-                value += "#250F";
-            } else if (pp.x < pos.x && pp.y == pos.y && np.x == pos.x && np.y < pos.y)
-                || (pp.x == pos.x && pp.y < pos.y && np.x < pos.x && np.y == pos.y)
-            {
-                // top-left corner
-                value += "#2513";
-            } else if (pp.x < pos.x && pp.y == pos.y && np.x == pos.x && np.y > pos.y)
-                || (pp.x == pos.x && pp.y > pos.y && np.x < pos.x && np.y == pos.y)
-            {
-                // bottom-right corner
-                value += "#251B";
             }
-        } else if let Some(pp) = prev_pos
-            && next_pos.is_none()
+        } else if let Some(pp) = prev_thing
+            && next_thing.is_none()
         {
             // is head
             if pp.y == pos.y {
@@ -263,8 +264,8 @@ impl Cobra {
                 // vertical
                 value += "#2503";
             }
-        } else if let Some(np) = next_pos
-            && prev_pos.is_none()
+        } else if let Some(np) = next_thing
+            && prev_thing.is_none()
         {
             // is tail
             if np.y == pos.y {
@@ -286,21 +287,18 @@ impl Cobra {
         self.head_dir = Direction::Right;
         self.state = CobraState::Alive;
         let center_pos = field.get_center();
-        let mut head_pos = center_pos.clone();
+        let mut body_pos = center_pos.clone();
         let mut tail_pos = center_pos.clone();
-        let body = ThingOnScreen::from_kind_at_pos(ThingKind::Cobra, center_pos);
-        head_pos.x += 1;
-        let head = ThingOnScreen::get_cobra_pixel(Some(&body.position), head_pos, None);
-        tail_pos.x -= 1;
-        let tail = ThingOnScreen::get_cobra_pixel(None, tail_pos, Some(&body.position));
-        self.body.push(tail);
-        self.body.push(body);
-        self.body.push(head);
+        body_pos.x -= 1;
+        tail_pos.x -= 2;
+        self.body.push(center_pos);
+        self.body.push(body_pos);
+        self.body.push(tail_pos);
     }
 
     fn collide(&self, pos: &Position) -> bool {
         for body_part in &self.body {
-            if pos.x == body_part.position.x && pos.y == body_part.position.y {
+            if pos.x == body_part.x && pos.y == body_part.y {
                 return true;
             }
         }
@@ -324,8 +322,7 @@ impl Cobra {
     fn move_cobra(&mut self, field: &mut Field) -> Option<CobraEffect> {
         let neck_i = self.body.len() - 1;
         let neck = &self.body[neck_i];
-        let new_neck_pos = neck.position.clone();
-        let mut head_pos = neck.position.clone();
+        let mut head_pos = neck.clone();
 
         // Move head
         match self.head_dir {
@@ -341,20 +338,21 @@ impl Cobra {
 
         let mut effect: Option<CobraEffect> = None;
         // Check for self collision
-        if self.collide(&head_pos) {
-            effect = Some(CobraEffect::Blow);
-        }
+        //if self.collide(&head_pos) {
+        //    effect = Some(CobraEffect::Blow);
+        //}
 
         // Handles edge collision
         for thing in &mut field.edges {
-            if thing.collide(&head_pos, true) {
+            if thing.collide(&head_pos) {
                 effect = thing.effect;
+                break;
             }
         }
 
         // Check for thing colision
         for thing in &mut field.things {
-            if thing.collide(&head_pos, false) {
+            if thing.collide(&head_pos) {
                 effect = thing.effect;
                 // Consumes thing effect
                 thing.effect = None;
@@ -362,17 +360,12 @@ impl Cobra {
             }
         }
         // Create new neck as can change depending on move Direction
-        let new_head = ThingOnScreen::get_cobra_pixel(Some(&neck.position), head_pos, None);
-        self.body[neck_i] = ThingOnScreen::get_cobra_pixel(
-            Some(&self.body[neck_i].position),
-            new_neck_pos,
-            Some(&new_head.position),
-        );
-        self.body.push(new_head);
+        self.body.push(head_pos);
         match effect {
             Some(CobraEffect::Blow) => self.state = CobraState::Dead,
             Some(CobraEffect::PowerUp) => {
                 self.state = CobraState::PoweredUp;
+                self.power_ticks_left = u8::MAX;
                 self.body.remove(0);
             }
             Some(CobraEffect::Grow) => (),
@@ -381,6 +374,13 @@ impl Cobra {
                 self.body.remove(0);
             }
         }
+        field.cobra_things.clear();
+        for (p, position) in self.body.iter().enumerate() {
+            let value = self.get_value(p);
+            field
+                .cobra_things
+                .push(ThingOnScreen::get_cobra_pixel(value, position.clone()));
+        }
         effect
     }
 }
@@ -388,6 +388,7 @@ impl Cobra {
 struct Field {
     edges: Vec<ThingOnScreen>,
     things: Vec<ThingOnScreen>,
+    cobra_things: Vec<ThingOnScreen>,
     height: u32,
     width: u32,
 }
@@ -414,17 +415,17 @@ impl Field {
     }
 
     fn new_empty(height: u32, width: u32) -> Self {
-        let things: Vec<ThingOnScreen> = Vec::new();
         Self {
             edges: Self::get_edges(height, width),
-            things,
+            things: Vec::new(),
+            cobra_things: Vec::new(),
             height,
             width,
         }
     }
 
     fn gen_things(&mut self, level: u8, cobra: &Cobra) {
-        let nthings: u8 = 4 + (2 ^ level);
+        let nthings: u8 = 4 + (2 * level);
         // Add rocks
         for _ in 0..(nthings - level) {
             let rock = ThingOnScreen::gen_at_the_field(ThingKind::Rock, self, cobra);
@@ -528,7 +529,6 @@ impl GameState {
     }
 
     fn level_up(&mut self) {
-        println!("Level up!");
         self.level.number += 1;
         self.reset_level(false);
     }
@@ -551,7 +551,7 @@ impl GameState {
                 grid[iy][ix] = Some(thing);
             }
         }
-        for thing in &self.cobra.body {
+        for thing in &self.field.cobra_things {
             let (iy, ix) = thing.get_idx();
             grid[iy][ix] = Some(thing);
         }
@@ -570,7 +570,7 @@ impl GameState {
     fn render(&mut self) {
         self.clear_screen();
         println!(
-            "Field: {}x{}  Score: {:05}   lives: {}  Tick: {}  Head Dir: {:?}  Level:{} Food left: {} Head pos: {}x{}",
+            "Field: {}x{}  Score: {:05}   lives: {}  Tick: {}  Head Dir: {:?}  Level:{} Food left: {} State: {:?}",
             &self.field.height,
             &self.field.width,
             &self.score,
@@ -579,8 +579,7 @@ impl GameState {
             &self.cobra.head_dir,
             &self.level.number,
             self.field.food_left(),
-            &self.cobra.body[self.cobra.body.len() - 1].position.y,
-            &self.cobra.body[self.cobra.body.len() - 1].position.x
+            &self.cobra.state
         );
 
         let field = self.get_field();
@@ -606,24 +605,28 @@ impl GameState {
         let mut effect: Option<CobraEffect> = None;
         if let CobraState::Alive = self.cobra.state {
             effect = self.cobra.move_cobra(&mut self.field);
+        } else if let CobraState::PoweredUp = self.cobra.state {
+            effect = self.cobra.move_cobra(&mut self.field);
+            self.cobra.power_ticks_left -= 1;
+            if self.cobra.power_ticks_left == 0 {
+                self.cobra.state = CobraState::Alive;
+            }
         }
-
-        let mut power_up = false;
 
         if let Some(CobraEffect::Blow) = effect {
             self.kill_cobra();
-        } else if let Some(CobraEffect::PowerUp) = effect {
-            power_up = true;
         } else if self.field.food_left() == 0 {
             self.level_up();
         }
-
-        let cobra_speed = self.level.speed(power_up) as f32;
-        let mut min_wait = 1000.0;
-        if cobra_speed > 0.0 {
-            min_wait /= cobra_speed;
+        let mut min_delay = 1000.0;
+        let mut cobra_speed = self.level.get_speed(&min_delay);
+        if let CobraState::PoweredUp = self.cobra.state {
+            cobra_speed *= 2.0;
         }
-        let mut dur = Duration::from_secs_f32(min_wait);
+        if cobra_speed > 0.0 {
+            min_delay /= cobra_speed;
+        }
+        let mut dur = Duration::from_secs_f32(min_delay);
         if let Some(key) = &*self.last_key.lock().unwrap() {
             let key_dir = self.cobra.dir_from_key(key);
             if let Some(k) = key_dir

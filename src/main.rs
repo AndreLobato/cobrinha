@@ -220,67 +220,19 @@ impl Cobra {
         if index > 0 {
             prev_thing = self.body.get(0.max(index - 1));
         }
-        let pos = &self.body[index];
-        let next_thing = self.body.get(self.body.len().min(index));
+        let next_thing = self.body.get(index + 1);
 
-        if let Some(pp) = prev_thing
-            && let Some(np) = next_thing
-        {
-            // top to right or right to top
-            if (pp.x == pos.x && pp.y < pos.y && np.x > pos.x && np.y == pos.y)
-                || (pp.x > pos.x && pp.y == pos.y && np.x == pos.x && np.y < pos.y)
-            {
-                value += "#2517";
-            // bottom to right or right to bottom
-            } else if (pp.x == pos.x && pp.y > pos.y && np.x > pos.x && np.y == pos.y)
-                || (pp.x > pos.x && pp.y == pos.y && np.x == pos.x && np.y > pos.y)
-            {
-                value += "#250F";
-            // left to bottom or bottom to left
-            } else if (pp.x < pos.x && pp.y == pos.y && np.x == pos.x && np.y > pos.y)
-                || (pp.x == pos.x && pp.y > pos.y && np.x < pos.x && np.y == pos.y)
-            {
-                value += "#2513";
-            // left to top or top to left
-            } else if (pp.x < pos.x && pp.y == pos.y && np.x == pos.x && np.y < pos.y)
-                || (pp.x == pos.x && pp.y > pos.y && np.x < pos.x && np.y == pos.y)
-            {
-                // bottom-right corner
-                value += "#251B";
-            } else if pp.x != np.x && pp.y == np.y {
-                // horizontal
-                value += "#2501";
-            } else if pp.x == np.x && pp.y != np.y {
-                // vertical
-                value += "#2503";
-            }
-        } else if let Some(pp) = prev_thing
-            && next_thing.is_none()
-        {
+        if prev_thing.is_some() && next_thing.is_some() {
+            // is body
+            value += "#25C9";
+        } else if prev_thing.is_some() && next_thing.is_none() {
             // is head
-            if pp.y == pos.y {
-                // horizontal
-                value += "#2501";
-            } else {
-                // vertical
-                value += "#2503";
-            }
-        } else if let Some(np) = next_thing
-            && prev_thing.is_none()
-        {
+            value += "#263B";
+        } else if next_thing.is_some() && prev_thing.is_none() {
             // is tail
-            if np.y == pos.y {
-                value += "#2501";
-            } else {
-                value += "#2503";
-            }
+            value += "#25CF";
         }
         value
-    }
-
-    fn die(&mut self, field: &Field) {
-        self.lives -= 1;
-        self.reset(field);
     }
 
     fn reset(&mut self, field: &Field) {
@@ -473,6 +425,7 @@ struct GameState {
     field: Field,
     cobra: Cobra,
     set_exit: bool,
+    game_over: bool,
     last_key: Arc<Mutex<Option<EventType>>>,
     key_is_pressed: Arc<Mutex<bool>>,
 }
@@ -494,14 +447,20 @@ impl GameState {
             field,
             cobra,
             set_exit: false,
+            game_over: false,
             last_key,
             key_is_pressed,
         }
     }
 
-    fn game_over(&mut self) {
+    fn show_game_over(&mut self) {
         self.clear_screen();
-        utilprint("Game Over! Press R to try again!".lover())
+        utilprint("Game Over! Press R to try again! Or Q to exit!".lover());
+        std::thread::sleep(Duration::from_secs(10));
+        let _guard = self.tick.lock();
+        // blocks until lock is dropped
+        self.tick.try_lock();
+        self.game_over = false;
     }
 
     fn bye(&mut self) {
@@ -521,21 +480,30 @@ impl GameState {
     }
 
     fn kill_cobra(&mut self) {
-        if self.cobra.lives == 0 {
-            self.game_over();
+        if self.cobra.lives > 0 {
+            self.cobra.lives -= 1;
         } else {
-            self.clear_screen();
-            println!("You died, restarting level!");
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            self.cobra.die(&self.field);
-            self.reset_level(true);
+            self.game_over = true;
         }
+        self.clear_screen();
+        println!("You died, restarting level!");
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        self.reset_level(true);
+    }
+
+    fn reset_game(&mut self) {
+        self.tick = Arc::clone(&TICK);
+        self.cobra.lives = 3;
+        self.score = 0;
+        self.level.number = 1;
+        self.reset_level(true);
     }
 
     fn reset_level(&mut self, reset_cobra: bool) {
         if reset_cobra {
             self.cobra.reset(&self.field);
         }
+        self.last_key = Arc::clone(&LAST_KEY);
         self.field.things.clear();
         self.field.gen_things(self.level.number, &self.cobra);
         self.next_tick();
@@ -578,6 +546,14 @@ impl GameState {
     fn clear_screen(&mut self) {
         print!("\x1B[2J\x1B[1;1H");
         io::stdout().flush().unwrap();
+    }
+
+    fn score_up(&mut self, value: i32) {
+        let mut multiplier = 1.0 * (self.level.number as f32 / 4.0);
+        if let CobraState::PoweredUp = self.cobra.state {
+            multiplier *= 2.0;
+        }
+        self.score += (value as f32 * multiplier) as i32;
     }
 
     fn render(&mut self) {
@@ -627,9 +603,15 @@ impl GameState {
         }
 
         if let Some(CobraEffect::Blow) = effect {
-            self.kill_cobra();
+            if self.cobra.lives == 0 {
+                self.game_over = true;
+                return;
+            } else {
+                self.kill_cobra();
+            }
         } else if self.field.food_left() == 0 {
             self.level_up();
+            self.score_up(100 * self.level.number as i32);
         }
         let mut min_delay = 1000.0;
         let mut cobra_speed = self.level.get_speed(&min_delay);
@@ -649,6 +631,7 @@ impl GameState {
                 dur /= 2;
             }
         }
+        self.score_up(1);
         self.render();
         let mut tick = self.tick.lock();
         *tick += 1;
@@ -674,13 +657,23 @@ fn main() {
         let tick = Arc::clone(&TICK);
         let mut key = last_key.lock().unwrap();
         let mut is_pressed = key_is_pressed.lock().unwrap();
-        if let EventType::KeyPress(_) = event.event_type {
-            *key = Some(event.event_type);
-            *is_pressed = true;
-            drop(tick);
-        }
-        if let EventType::KeyRelease(_) = event.event_type {
-            *is_pressed = false;
+        match event.event_type {
+            EventType::KeyPress(Key::KeyR) | EventType::KeyPress(Key::KeyQ) => {
+                if tick.is_locked() {
+                    drop(tick)
+                }
+            }
+            EventType::KeyPress(_) => {
+                *key = Some(event.event_type);
+                *is_pressed = true;
+                if tick.is_locked() {
+                    drop(tick);
+                }
+            }
+            EventType::KeyRelease(_) => {
+                *is_pressed = false;
+            }
+            _ => {}
         }
     };
     let last_key = Arc::clone(&LAST_KEY);
@@ -695,7 +688,12 @@ fn main() {
         }
     });
     loop {
-        state.next_tick();
+        if state.game_over {
+            state.show_game_over();
+            state.reset_game();
+        } else {
+            state.next_tick();
+        }
         if state.set_exit {
             println!("Exiting game loop!");
             break;

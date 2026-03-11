@@ -456,10 +456,21 @@ impl GameState {
     fn show_game_over(&mut self) {
         self.clear_screen();
         utilprint("Game Over! Press R to try again! Or Q to exit!".lover());
-        std::thread::sleep(Duration::from_secs(10));
-        let _guard = self.tick.lock();
+        let _tick = self.tick.lock();
         // blocks until lock is dropped
-        self.tick.try_lock();
+        while self.tick.is_locked() {
+            std::thread::sleep(Duration::from_secs(1));
+            let key = self.last_key.lock().unwrap();
+            if let Some(EventType::KeyPress(Key::KeyR)) = *key {
+                println!("Restarting Game...");
+                std::thread::sleep(Duration::from_secs(1));
+                break;
+            } else if let Some(EventType::KeyPress(Key::KeyQ)) = *key {
+                println!("Quiting Game...");
+                std::thread::sleep(Duration::from_secs(1));
+                break;
+            }
+        }
         self.game_over = false;
     }
 
@@ -492,7 +503,9 @@ impl GameState {
     }
 
     fn reset_game(&mut self) {
-        self.tick = Arc::clone(&TICK);
+        let mut tick = self.tick.lock();
+        *tick = 0;
+        drop(tick);
         self.cobra.lives = 3;
         self.score = 0;
         self.level.number = 1;
@@ -503,10 +516,11 @@ impl GameState {
         if reset_cobra {
             self.cobra.reset(&self.field);
         }
-        self.last_key = Arc::clone(&LAST_KEY);
         self.field.things.clear();
         self.field.gen_things(self.level.number, &self.cobra);
         self.next_tick();
+        let mut key = self.last_key.lock().unwrap();
+        *key = None;
     }
 
     fn level_up(&mut self) {
@@ -549,7 +563,7 @@ impl GameState {
     }
 
     fn score_up(&mut self, value: i32) {
-        let mut multiplier = 1.0 * (self.level.number as f32 / 4.0);
+        let mut multiplier = (1.max(self.level.number / 2)) as f32;
         if let CobraState::PoweredUp = self.cobra.state {
             multiplier *= 2.0;
         }
@@ -658,11 +672,6 @@ fn main() {
         let mut key = last_key.lock().unwrap();
         let mut is_pressed = key_is_pressed.lock().unwrap();
         match event.event_type {
-            EventType::KeyPress(Key::KeyR) | EventType::KeyPress(Key::KeyQ) => {
-                if tick.is_locked() {
-                    drop(tick)
-                }
-            }
             EventType::KeyPress(_) => {
                 *key = Some(event.event_type);
                 *is_pressed = true;

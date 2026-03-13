@@ -455,7 +455,12 @@ impl GameState {
 
     fn show_game_over(&mut self) {
         self.clear_screen();
-        utilprint("Game Over! Press R to try again! Or Q to exit!".lover());
+        utilprint("Game Over!".red());
+        println!(
+            "Congratulations you've reached level {} and your score was {:05}!",
+            self.level.number, self.score
+        );
+        println!("Press R to try again! Or Q to exit!");
         let _tick = self.tick.lock();
         // blocks until lock is dropped
         while self.tick.is_locked() {
@@ -518,9 +523,11 @@ impl GameState {
         }
         self.field.things.clear();
         self.field.gen_things(self.level.number, &self.cobra);
+        {
+            let mut key = self.last_key.lock().unwrap();
+            *key = None;
+        }
         self.next_tick();
-        let mut key = self.last_key.lock().unwrap();
-        *key = None;
     }
 
     fn level_up(&mut self) {
@@ -708,6 +715,7 @@ fn main() {
             break;
         }
     }
+    println!("After loop...");
     handle.join().unwrap();
     println!("Bye!");
     std::process::exit(0);

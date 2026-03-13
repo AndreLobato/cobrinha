@@ -426,7 +426,8 @@ struct GameState {
     cobra: Cobra,
     set_exit: bool,
     game_over: bool,
-    last_key: Arc<Mutex<Option<EventType>>>,
+    input_queue: Arc<Mutex<Vec<EventType>>>,
+    last_key: Option<EventType>,
     key_is_pressed: Arc<Mutex<bool>>,
 }
 
@@ -434,7 +435,7 @@ impl GameState {
     fn init(
         height: u32,
         width: u32,
-        last_key: Arc<Mutex<Option<EventType>>>,
+        input_queue: Arc<Mutex<Vec<EventType>>>,
         key_is_pressed: Arc<Mutex<bool>>,
         tick: Arc<SafeMutex<i32>>,
     ) -> Self {
@@ -448,7 +449,8 @@ impl GameState {
             cobra,
             set_exit: false,
             game_over: false,
-            last_key,
+            input_queue,
+            last_key: None,
             key_is_pressed,
         }
     }
@@ -465,12 +467,13 @@ impl GameState {
         // blocks until lock is dropped
         while self.tick.is_locked() {
             std::thread::sleep(Duration::from_secs(1));
-            let key = self.last_key.lock().unwrap();
-            if let Some(EventType::KeyPress(Key::KeyR)) = *key {
+            let queue = self.input_queue.lock().unwrap();
+            let key = queue.first();
+            if let Some(EventType::KeyPress(Key::KeyR)) = key {
                 println!("Restarting Game...");
                 std::thread::sleep(Duration::from_secs(1));
                 break;
-            } else if let Some(EventType::KeyPress(Key::KeyQ)) = *key {
+            } else if let Some(EventType::KeyPress(Key::KeyQ)) = key {
                 println!("Quiting Game...");
                 std::thread::sleep(Duration::from_secs(1));
                 break;
@@ -484,11 +487,11 @@ impl GameState {
         println!("You pressed Q, Good bye!!!");
     }
 
-    fn handle_keys(&mut self) {
-        if let Some(key) = &*self.last_key.lock().unwrap() {
-            let dir = self.cobra.dir_from_key(key);
-            if let EventType::KeyPress(Key::KeyQ) = key {
-                self.set_exit = true
+    fn handle_key(&mut self) {
+        if let Some(k) = self.last_key {
+            let dir = self.cobra.dir_from_key(&k);
+            if let EventType::KeyPress(Key::KeyQ) = k {
+                self.set_exit = true;
             } else if let Some(d) = dir {
                 self.cobra.set_direction(d);
             }
@@ -523,10 +526,7 @@ impl GameState {
         }
         self.field.things.clear();
         self.field.gen_things(self.level.number, &self.cobra);
-        {
-            let mut key = self.last_key.lock().unwrap();
-            *key = None;
-        }
+        self.last_key = None;
         self.next_tick();
     }
 
@@ -607,7 +607,7 @@ impl GameState {
     }
 
     fn next_tick(&mut self) {
-        self.handle_keys();
+        self.handle_key();
         if self.set_exit {
             self.bye();
             return;
@@ -643,7 +643,7 @@ impl GameState {
             min_delay /= cobra_speed;
         }
         let mut dur = Duration::from_secs_f32(min_delay);
-        if let Some(key) = &*self.last_key.lock().unwrap() {
+        if let Some(key) = &self.last_key {
             let key_dir = self.cobra.dir_from_key(key);
             if let Some(k) = key_dir
                 && k == self.cobra.head_dir
@@ -656,15 +656,21 @@ impl GameState {
         self.render();
         let mut tick = self.tick.lock();
         *tick += 1;
-        self.tick.try_lock_for(dur);
-        if self.tick.is_locked() {
+        let mut queue = self.input_queue.lock().unwrap();
+        let key = queue.pop();
+        if key.is_some() {
+            self.last_key = key;
+            drop(tick);
+        }
+        let tick = self.tick.try_lock_for(dur);
+        if tick.is_some() {
             drop(tick);
         }
     }
 }
 
-static LAST_KEY: once_cell::sync::Lazy<Arc<Mutex<Option<EventType>>>> =
-    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(None)));
+static INPUT_QUEUE: once_cell::sync::Lazy<Arc<Mutex<Vec<EventType>>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
 static KEY_IS_PRESSED: once_cell::sync::Lazy<Arc<Mutex<bool>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(false)));
 static TICK: once_cell::sync::Lazy<Arc<SafeMutex<i32>>> =
@@ -673,14 +679,14 @@ static TICK: once_cell::sync::Lazy<Arc<SafeMutex<i32>>> =
 fn main() {
     let (w, h) = terminal_size().unwrap();
     let callback = move |event: Event| {
-        let last_key = Arc::clone(&LAST_KEY);
         let key_is_pressed = Arc::clone(&KEY_IS_PRESSED);
         let tick = Arc::clone(&TICK);
-        let mut key = last_key.lock().unwrap();
+        let input_queue = Arc::clone(&INPUT_QUEUE);
+        let mut queue = input_queue.lock().unwrap();
         let mut is_pressed = key_is_pressed.lock().unwrap();
         match event.event_type {
             EventType::KeyPress(_) => {
-                *key = Some(event.event_type);
+                queue.insert(0, event.event_type);
                 *is_pressed = true;
                 if tick.is_locked() {
                     drop(tick);
@@ -692,10 +698,10 @@ fn main() {
             _ => {}
         }
     };
-    let last_key = Arc::clone(&LAST_KEY);
+    let input_queue = Arc::clone(&INPUT_QUEUE);
     let is_pressed = Arc::clone(&KEY_IS_PRESSED);
     let tick = Arc::clone(&TICK);
-    let mut state = GameState::init(h.0 as u32, w.0 as u32, last_key, is_pressed, tick);
+    let mut state = GameState::init(h.0 as u32, w.0 as u32, input_queue, is_pressed, tick);
     state.reset_level(true);
     let handle = thread::spawn(move || {
         // Code to run in the new thread

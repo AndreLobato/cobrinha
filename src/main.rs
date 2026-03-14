@@ -487,7 +487,21 @@ impl GameState {
         println!("You pressed Q, Good bye!!!");
     }
 
-    fn handle_key(&mut self) {
+    fn handle_key(&mut self) -> bool {
+        let mut queue = self.input_queue.lock().unwrap();
+        let key = queue.pop();
+        let mut accel = false;
+        if let Some(k) = key {
+            let key_dir = self.cobra.dir_from_key(&k);
+            if let Some(d) = key_dir
+                && d != self.cobra.head_dir
+            {
+                accel = true;
+            } else if *self.key_is_pressed.lock().unwrap() {
+                accel = true;
+            }
+            self.last_key = key;
+        }
         if let Some(k) = self.last_key {
             let dir = self.cobra.dir_from_key(&k);
             if let EventType::KeyPress(Key::KeyQ) = k {
@@ -496,6 +510,7 @@ impl GameState {
                 self.cobra.set_direction(d);
             }
         }
+        accel
     }
 
     fn kill_cobra(&mut self) {
@@ -607,7 +622,7 @@ impl GameState {
     }
 
     fn next_tick(&mut self) {
-        self.handle_key();
+        let accel = self.handle_key();
         if self.set_exit {
             self.bye();
             return;
@@ -643,23 +658,13 @@ impl GameState {
             min_delay /= cobra_speed;
         }
         let mut dur = Duration::from_secs_f32(min_delay);
+        if accel {
+            dur /= 2;
+        }
         self.score_up(1);
         self.render();
         let mut tick = self.tick.lock();
         *tick += 1;
-        let mut queue = self.input_queue.lock().unwrap();
-        let key = queue.pop();
-        if let Some(k) = key {
-            let key_dir = self.cobra.dir_from_key(&k);
-            if let Some(d) = key_dir
-                && d != self.cobra.head_dir
-            {
-                dur /= 2;
-            } else if *self.key_is_pressed.lock().unwrap() {
-                dur /= 2;
-            }
-            self.last_key = key;
-        }
         let tick = self.tick.try_lock_for(dur);
         if tick.is_some() {
             drop(tick);

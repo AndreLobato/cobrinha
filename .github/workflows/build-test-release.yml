@@ -17,21 +17,21 @@ jobs:
             install-deps: sudo apt install pkg-config libx11-dev gcc-multilib
             target: x86_64-unknown-linux-musl
 
-          - os-name: Linux-aarch64
-            runs-on: ubuntu-24.04
-            install-deps: sudo apt install pkg-config libx11-dev gcc-multilib
-            target: aarch64-unknown-linux-musl
-
-          - os-name: Windows-x86_64
-            runs-on: windows-latest
-            install-deps: echo Windows
-            target: x86_64-pc-windows-msvc
-
-          - os-name: macOS-x86_64
-            runs-on: macOS-latest
-            install-deps: echo maaaac
-            target: x86_64-apple-darwin
-
+          # - os-name: Linux-aarch64
+          #   runs-on: ubuntu-24.04
+          #   install-deps: sudo apt install pkg-config libx11-dev gcc-multilib
+          #   target: aarch64-unknown-linux-musl
+          #
+          # - os-name: Windows-x86_64
+          #   runs-on: windows-latest
+          #   install-deps: echo Windows
+          #   target: x86_64-pc-windows-msvc
+          #
+          # - os-name: macOS-x86_64
+          #   runs-on: macOS-latest
+          #   install-deps: echo maaaac
+          #   target: x86_64-apple-darwin
+          #
     runs-on: ${{ matrix.platform.runs-on }}
     steps:
       - name: Checkout

@@ -580,12 +580,12 @@ impl GameState {
     fn render(&mut self) {
         self.clear_screen();
         println!(
-            "Field: {}x{}  Score: {:05}   lives: {}  Tick: {:?},   Head Dir: {:?}  Level:{} Food left: {} State: {:?}",
+            "Field: {}x{}  Score: {:05}   lives: {}  Queue: {},   Head Dir: {:?}  Level:{} Food left: {} State: {:?}",
             &self.field.height,
             &self.field.width,
             &self.score,
             &self.cobra.lives,
-            &*self.tick,
+            &self.input_queue.lock().unwrap().len(),
             &self.cobra.head_dir,
             &self.level.number,
             self.field.food_left(),
@@ -643,24 +643,22 @@ impl GameState {
             min_delay /= cobra_speed;
         }
         let mut dur = Duration::from_secs_f32(min_delay);
-        if let Some(key) = &self.last_key {
-            let key_dir = self.cobra.dir_from_key(key);
-            if let Some(k) = key_dir
-                && k == self.cobra.head_dir
-                && *self.key_is_pressed.lock().unwrap()
-            {
-                dur /= 2;
-            }
-        }
         self.score_up(1);
         self.render();
         let mut tick = self.tick.lock();
         *tick += 1;
         let mut queue = self.input_queue.lock().unwrap();
         let key = queue.pop();
-        if key.is_some() {
+        if let Some(k) = key {
+            let key_dir = self.cobra.dir_from_key(&k);
+            if let Some(d) = key_dir
+                && d != self.cobra.head_dir
+            {
+                dur /= 2;
+            } else if *self.key_is_pressed.lock().unwrap() {
+                dur /= 2;
+            }
             self.last_key = key;
-            drop(tick);
         }
         let tick = self.tick.try_lock_for(dur);
         if tick.is_some() {
@@ -680,16 +678,16 @@ fn main() {
     let (w, h) = terminal_size().unwrap();
     let callback = move |event: Event| {
         let key_is_pressed = Arc::clone(&KEY_IS_PRESSED);
-        let tick = Arc::clone(&TICK);
         let input_queue = Arc::clone(&INPUT_QUEUE);
         let mut queue = input_queue.lock().unwrap();
         let mut is_pressed = key_is_pressed.lock().unwrap();
         match event.event_type {
             EventType::KeyPress(_) => {
-                queue.insert(0, event.event_type);
-                *is_pressed = true;
-                if tick.is_locked() {
-                    drop(tick);
+                let last_input = queue.first();
+                if last_input != Some(&event.event_type) {
+                    queue.insert(0, event.event_type);
+                } else {
+                    *is_pressed = true;
                 }
             }
             EventType::KeyRelease(_) => {

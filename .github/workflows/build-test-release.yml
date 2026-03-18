@@ -14,14 +14,17 @@ jobs:
         platform:
           - os-name: Linux-x86_64
             runs-on: ubuntu-24.04
+            executable-name: cobrinha
             target: x86_64-unknown-linux-gnu
 
           - os-name: Linux-aarch64-macOS
             runs-on: ubuntu-24.04
+            executable-name: cobrinha
             target: aarch64-unknown-linux-gnu
 
           - os-name: Windows-x87_64
             runs-on: ubuntu-24.04
+            executable-name: cobrinha.exe
             target: x86_64-pc-windows-gnu
 
     runs-on: ${{ matrix.platform.runs-on }}
@@ -35,5 +38,5 @@ jobs:
       - name: Publish artifacts and release
         uses: houseabsolute/actions-rust-release@v0
         with:
-          executable-name: cobrinha
+          executable-name: ${{ matrix.platform.executable-name }}
           target: ${{ matrix.platform.target }}
